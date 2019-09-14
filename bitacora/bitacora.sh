@@ -1,6 +1,6 @@
  #!/bin/bash
 
-if [ -f db1 ]; then
+if [ -f db1 -a -r db1 ]; then
 
    # SI LA BASE DE DATOS EXISTE ENTONCES CREARA UNA SEGUNDA PARA COMPARAR CON LA PRIMERA.
    # PARA ELLO RECUPERARA LA RUTA A EXAMINAR DEL ARCHIVO .CFG, LA DE LA BITACORA
@@ -34,9 +34,9 @@ if [ -f db1 ]; then
      # ANIADE TODOS LOS PARAMETROS DESACTIVADOS
      echo -e "#USTED PUEDE ACTIVAR O DESACTIVAR LOS PARAMETROS PARA LA COMPARACION DE MODIFICACIONES.\n#PARA ACTIVARLOS BORRE EL SIMBOLO DE #. PARA ACTIVARLOS AGREGUELO ANTES DEL GUIÓN MEDIO '-'.\n#MANTENGA SIEMPRE ACTIVADO -I\n# NUMERO DE INODO\n-I\n# PERMISOS\n#-P\n# NUMERO DE LIGAS\n#-L\n# DUENO\n#-D\n# GRUPO\n#-G\n# TAMANO DEL ARCHIVO\n#-T\n# FECHA DE ULTIMO ACCESO\n#-A\n# FECHA DE ULTIMA MODIFICACION\n#-M\n# FECHA DE ULTIMA MODIFIACION AL CONTENIDO DEL INODO\n#-C\n" > configuracion.tmp 2>> errores.log
      # ANIADE LAS RUTAS DE EXPLORACION Y GUARDADO DE BITACORA
-     sed -n '/SIS/,/log/p'  configuracion.cfg 2>> errores.log >> configuracion.tmp 2>> errores.log
+     sed -n '/SIS/,/log/p'  configuracion.cfg >> configuracion.tmp 2>> errores.log
      # ANIADE LOS PARAMETROS DE LAS BANDERAS
-     sed -e 's/[^IPLDGTAMC-]//g' -e 's/-\{2,\}//g' -e 's/[A-Z][A-Z]//g' -e 's/-$//g' flags >> configuracion.tmp 2>> errores.log
+     sed -e 's/[^IPLDGTAMC-]//g' -e 's/-\{2,\}//g' -e 's/[A-Z][A-Z]//g' -e 's/-$//g' -e '/^$/d' flags |  sort | uniq | sed -e 's/-P/# PERMISOS\n-P\n/1' -e 's/-L/# NUMERO DE LIGAS\n-L\n/1' -e 's/-D/# DUENO\n-D\n/1' -e 's/-G/# GRUPO\n-G\n/1' -e 's/-T/# TAMANO DEL ARCHIVO\n-T\n/1' -e 's/-A/# FECHA DE ULTIMO ACCESO\n-A\n/1' -e 's/-M/# FECHA DE ULTIMA MODIFICACION\n-M\n/1' -e 's/-C/# FECHA DE ULTIMA MODIFIACION AL CONTENIDO DEL INODO\n-C\n/1' >> configuracion.tmp 2>> errores.log
      # ACTUALIZA EL ARCHIVO DE CONFIGURACIONES
      rm configuracion.cfg flags 2>> errores.log
      mv configuracion.tmp configuracion.cfg
@@ -75,20 +75,39 @@ if [ -f db1 ]; then
 	# PARA LA BASE BASE DE DATOS 1
 
 	columnas_flag="$(sed -e '/^[^-]/d' -e '/#/d' -e 's/[[:space:]]//g'  -e '/^$/d'  configuracion.cfg | sed -e '/-I/c\1' -e '/-P/c\2' -e '/-L/c\3' -e '/-D/c\4' -e '/-G/c\5' -e '/-T/c\6' -e '/-A/c\7' -e '/-M/c\8' -e '/-C/c\9' | sort -g | uniq | paste -s -d",")"
-	echo $clumnas_flag > columnas1.txt  2>> errores.log
+	echo $columnas_flag > columnas1.txt  2>> errores.log
 	cut -f$columnas_flag -d: db1 > temporaldb1 2>> errores.log
 
 	# PARA LA BASE DE DATOS 2
 
 	columnas_flag="$(sed -e '/^[^-]/d' -e '/#/d' -e 's/[[:space:]]//g'  -e '/^$/d'  configuracion.cfg | sed -e '/-I/c\1' -e '/-P/c\2' -e '/-L/c\3' -e '/-D/c\4' -e '/-G/c\5' -e '/-T/c\6' -e '/-A/c\7' -e '/-M/c\8' -e '/-C/c\9' | sort -g | uniq | paste -s -d",")"
-	echo $clumnas_flag > columnas2.txt 2>> errores.log
+	echo $columnas_flag > columnas2.txt 2>> errores.log
 	cut -f$columnas_flag -d: db2 > temporaldb2 2>> errores.log
 
 	# COMPARA SI HAY DIFERENCIAS
 
-	diff temporaldb1 temporaldb2 | sed -e '/^[^><]/d' -e 's/[<>] //g' | sort -k1g -t":" | grep  '^.*:.*:.*:.*:.*:.*:.*:.*:.*$' | uniq  > diferencias 2>> errores.log
-	rm columnas1.txt columnas2.txt temporaldb1 temporaldb2 2>> errores.log   #BORRA ARCHIVOS UTILIZADOS
+  echo `date`  > diferencias 2>> errores.log
+  echo -e "+++ Base de datos actual\n--- Base de datos pasada" >> diferencias 2>> errores.log
+  # diff -L"Base de datos pasada" -L"Base de datos actual"  se utilizo para indicar que era + y - pero entraba en el sort
+  diff -u  temporaldb1 temporaldb2 | sed -e '/^[^+-]/d' -e '/^[+-][+-]/d' | sort -k+1.2,1  -t":"  | uniq  >> diferencias 2>> errores.log              # SORT DE LA PRIMER COLUMNA TOMAR EN CUENTA DESDE EL SEGUNDO CARACTER HASTA QUE SE ACABE LA PRIMER COLUMNA
 
+  grep '^-[^-]' diferencias | cut -f1 -d":" | sed -e 's#-#/^#g' -e 's#$#/#g' > id1 2>> errores.log
+  awk -F: -f id1 db1 > dif_1 2>> errores.log 
+  
+
+  grep '^+[^+]' diferencias | cut -f1 -d":" | sed -e 's#+#/^#g' -e 's#$#/#g' > id2 2>> errores.log
+  awk -F: -f id2 db2 > dif_2 2>> errores.log 
+
+  echo `date '+%A %d %B %Y a las %r' 2>> errores.log`  >> bitacora.log 2>> errores.log
+  echo -e "+++ Base de datos actual con ultima modificacion el `ls -liu  --time-style="+%A %d %B %Y a las %r de la semana %U" db1 | tr -s " " " " | cut -f7-18 -d" " 2>> errores.log`\n--- Base de datos pasada con ultima modificacion el `ls -liu  --time-style="+%A %d %B %Y a las %r de la semana %U" db2 | tr -s " " " " | cut -f7-18 -d" " 2>> errores.log`" >> bitacora.log 2>> errores.log
+  diff -u  dif_1 dif_2 | sed -e '/^[^+-]/d' -e '/^[+-][+-]/d' | sort -k+1.2,1  -t":"  | uniq  >> bitacora.log 2>> errores.log
+
+  
+
+
+	rm columnas1.txt columnas2.txt temporaldb1 temporaldb2 dif_1 dif_2 diferencias id1 id2 2>> errores.log   #BORRA ARCHIVOS UTILIZADOS
+	rm db1 2>> errores.log
+	mv db2 db1 2>> errores.log
 
 ###############################################################################
 ###############################################################################
